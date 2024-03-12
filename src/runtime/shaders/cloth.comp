@@ -1,0 +1,38 @@
+#version 460 core
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct Vertex {
+    vec4 pos_pinned;
+    vec4 force_mass;
+    vec3 prev_pos;
+    vec3 normal;
+    vec2 tc;
+};
+struct Adjacency {
+    uvec3 indices[6];
+    uint indice_count;
+};
+layout(std430, binding = 0) buffer VERTEX_DATA { Vertex vertices[]; };
+layout(std430, binding = 1) buffer INDICES_DATA { uint indices[]; };
+layout(std430, binding = 2) buffer VD { Adjacency adjs[]; };
+
+void main() {
+    uvec3 gid = gl_GlobalInvocationID;
+    uint gidx = gl_GlobalInvocationID.y * gl_NumWorkGroups.x + gl_GlobalInvocationID.x;
+
+    vertices[gidx].normal = vec3(0.0);
+
+    for (uint i = 0; i < adjs[gidx].indice_count; ++i) {
+        vec3 v0, v1, v2;
+        v0 = vertices[adjs[gidx].indices[i].x].pos_pinned.xyz;
+        v1 = vertices[adjs[gidx].indices[i].y].pos_pinned.xyz;
+        v2 = vertices[adjs[gidx].indices[i].z].pos_pinned.xyz;
+
+        vec3 e1, e2;
+        e1 = v1 - v0;
+        e2 = v2 - v0;
+
+        vertices[gidx].normal += cross(e1, e2);
+    }
+    vertices[gidx].normal = normalize(vertices[gidx].normal);
+}

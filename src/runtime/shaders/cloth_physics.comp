@@ -1,0 +1,98 @@
+#version 460 core
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct Vertex {
+    vec4 pos_pinned;
+    vec4 force_mass;
+    vec3 prev_pos;
+    vec3 normal;
+    vec2 tc;
+};
+layout(std430, binding = 0) buffer VERTEX_DATA { Vertex vertices[]; };
+layout(std430, binding = 1) buffer INDICES_DATA { uint indices[]; };
+
+uniform uint cols;
+uniform uint rows;
+uniform uint offset;
+
+uniform vec3 gravity_force;
+uniform float time;
+uniform float delta_time;
+
+uniform float row_dist;
+uniform float col_dist;
+
+void constrain_position(uint a, uint b, float dist, float inv_dist) {
+    // a = indices[a];
+    // b = indices[b];
+
+    const vec3 va = vertices[a].pos_pinned.xyz;
+    const vec3 vb = vertices[b].pos_pinned.xyz;
+    const bool pa = vertices[a].pos_pinned.w == 1.0f;
+    const bool pb = vertices[b].pos_pinned.w == 1.0f;
+
+    const float l          = distance(va, vb);
+    const vec3 diff        = va - vb;
+    const float diff_scale = (dist - l) * inv_dist;
+
+    if (abs(diff_scale) < 0.01f) return;
+
+    const vec3 offset = diff * diff_scale * 0.5f;
+    float mass1       = vertices[a].force_mass.w + vertices[b].force_mass.w;
+    float mass2       = vertices[a].force_mass.w / mass1;
+    mass1             = vertices[b].force_mass.w / mass1;
+
+    if (pa == false) {
+        vertices[a].pos_pinned.xyz += offset * mass1;
+        vertices[a].force_mass.xyz += offset * mass1;
+    }
+    if (pb == false) {
+        vertices[b].pos_pinned.xyz -= offset * mass2;
+        vertices[b].force_mass.xyz -= offset * mass2;
+    }
+
+    vertices[a].prev_pos = vertices[a].pos_pinned.xyz;
+    vertices[b].prev_pos = vertices[b].pos_pinned.xyz;
+}
+
+void main() {
+    float inv_row_dist = 1.0f / row_dist;
+    float inv_col_dist = 1.0f / col_dist;
+    uint base_offset   = rows * cols - (cols - (gl_GlobalInvocationID.x * 2 + offset));
+
+    vec3 im_sphere = vec3(0.0f, -1.0f, sin(time * 0.06f) * 6.f);
+    vec3 im_sphere1 = vec3(cos(time*2.f) * 0.3f, 0.f, sin(time * 0.4f) * 2.f);
+
+    for (uint i = base_offset; i >= cols; i -= cols) {
+        uint idx = i;
+
+        if (vertices[idx].pos_pinned.w == 1.0f) continue;
+
+        if (distance(vertices[idx].pos_pinned.xyz, im_sphere) - 0.4f < 0.01f) {
+            vertices[idx].force_mass.xyz += normalize(vertices[idx].pos_pinned.xyz - im_sphere) * delta_time;
+        }
+        if (distance(vertices[idx].pos_pinned.xyz, im_sphere1) - 0.4f < 0.01f) {
+            vertices[idx].force_mass.xyz += normalize(vertices[idx].pos_pinned.xyz - im_sphere1) * delta_time;
+        }
+
+        vertices[idx].force_mass.xyz += (gravity_force * vertices[idx].force_mass.w * delta_time);
+        vertices[idx].pos_pinned.xyz
+            += (vertices[idx].pos_pinned.xyz - vertices[idx].prev_pos + vertices[idx].force_mass.xyz);
+    }
+
+    for (int j = 0; j < 8; ++j) {
+
+        for (uint i = base_offset; i >= cols; i -= cols) {
+            uint idx = i; // base_offset / column_count * 24 + i;
+
+            constrain_position(idx, idx + 1, col_dist, inv_col_dist);
+            constrain_position(idx, idx - cols, row_dist, inv_row_dist);
+        }
+        for (uint i = base_offset; i >= cols; i -= cols) {
+            uint idx = i; // base_offset / column_count * 24 + i;
+
+            constrain_position(idx, idx + 1, col_dist, inv_col_dist);
+            constrain_position(idx + 1, idx + 1 - cols, row_dist, inv_row_dist);
+        }
+    }
+}
